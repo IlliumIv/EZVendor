@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using ExileCore;
+using ExileCore.PoEMemory.Components;
 using ExileCore.PoEMemory.Elements.InventoryElements;
 
 namespace EZVendor.Item.Filters
@@ -29,12 +31,20 @@ namespace EZVendor.Item.Filters
             }
                 
             if (_vendorTransmutes &&
-                new Random().NextDouble() < 0.66 &&
+                Item.HasComponent<Stack>() &&
+                Item.GetComponent<Stack>().Size <= 15 && // dont vendor full stack transmutes
+                new Random().NextDouble() < 0.6 &&
                 Item.Path == @"Metadata/Items/Currency/CurrencyUpgradeToMagic")
                 return Actions.Vendor;
                 
             if (_vendorScraps &&
+                new Random().NextDouble() < 0.85 &&
                 Item.Path == @"Metadata/Items/Currency/CurrencyArmourQuality")
+                return Actions.Vendor;
+            
+            if (_vendorScraps &&
+                new Random().NextDouble() < 0.85 &&
+                Item.Path == @"Metadata/Items/Currency/CurrencyWeaponQuality")
                 return Actions.Vendor;
             
             return Actions.CantDecide;

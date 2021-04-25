@@ -7,11 +7,13 @@ namespace EZVendor.Item.Filters
 {
     internal class RareAbyssJewel : AbstractRareItem
     {
-        public RareAbyssJewel(
-            GameController gameController,
-            NormalInventoryItem normalInventoryItem)
+        private readonly bool _lessGarbage;
+
+        public RareAbyssJewel(GameController gameController,
+            NormalInventoryItem normalInventoryItem, bool lessGarbage)
             : base(gameController, normalInventoryItem)
         {
+            _lessGarbage = lessGarbage;
         }
 
         public override Actions Evaluate()
@@ -32,7 +34,7 @@ namespace EZVendor.Item.Filters
 
                 #endregion
 
-                return weight >= 1f
+                return (_lessGarbage ? -1 : 0) + weight >= 1f
                     ? Actions.Keep
                     : Actions.Vendor;
             }

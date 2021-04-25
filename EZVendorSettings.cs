@@ -24,6 +24,9 @@ namespace EZVendor
 
         [Menu("Auto click sell window accept button (enable for auto sell)")]
         public ToggleNode AutoClickAcceptButton { get; set; } = new ToggleNode(true);
+        
+        [Menu("Vendor influenced gear (enable for auto sell)")]
+        public ToggleNode VendorInfluenced { get; set; } = new ToggleNode(true);
 
         [Menu("Click cancel button instead (for debug)")]
         public ToggleNode AutoClickDebug { get; set; } = new ToggleNode(false);
@@ -31,10 +34,13 @@ namespace EZVendor
         [Menu("Vendor transmutes")]
         public ToggleNode VendorTransmutes { get; set; } = new ToggleNode(true);
         
-        [Menu("Vendor scraps")]
+        [Menu("Vendor scraps/whetstones")]
         public ToggleNode VendorScraps { get; set; } = new ToggleNode(true);
-        
-        [Menu("Bypass broken ItemMods component")]
+       
+        [Menu("Less garbage (enable after first week of league)")]
+        public ToggleNode StricterFiltering { get; set; } = new ToggleNode(true);
+
+        [Menu("Bypass broken ItemMods component (debug)")]
         public ToggleNode BypassBrokenItemMods { get; set; } = new ToggleNode(false);
         
         [Menu("Extra log (for debug)")] 
@@ -42,6 +48,6 @@ namespace EZVendor
 
         public ToggleNode Enable { get; set; } = new ToggleNode(false);
         
-        public string LeagueName2 = "Ritual";
+        public string LeagueName3 = "Ultimatum";
     }
 }

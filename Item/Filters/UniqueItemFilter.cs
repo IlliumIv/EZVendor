@@ -1,6 +1,11 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.RegularExpressions;
 using ExileCore;
+using ExileCore.PoEMemory.Components;
 using ExileCore.PoEMemory.Elements.InventoryElements;
+using ExileCore.Shared.Enums;
 using EZVendor.Item.Ninja;
 
 namespace EZVendor.Item.Filters
@@ -22,10 +27,13 @@ namespace EZVendor.Item.Filters
         {
             try
             {
-                if (ItemModsComponent.UniqueName.Length <= 4)
-                    return Actions.Vendor;
-                var garbage = _ninjaProvider.GetCheapUniques();
-                return garbage.Contains(ItemModsComponent.UniqueName)
+                if (ItemModsComponent.ItemRarity != ItemRarity.Unique) return Actions.CantDecide;
+                if (ItemModsComponent.UniqueName.Length <= 4) return Actions.Vendor;
+                if (ItemModsComponent.UniqueName == @"Hotfooted") return Actions.Vendor; // Hotheaded
+                var garbage = Item?.GetComponent<Sockets>()?.LargestLinkSize == 6
+                    ? _ninjaProvider.GetCheap6LUniques()
+                    : _ninjaProvider.GetCheap0LUniques();
+                return garbage.Any(name => IsSameName(name, ItemModsComponent.UniqueName))
                     ? Actions.Vendor
                     : Actions.CantDecide;
             }
@@ -33,6 +41,14 @@ namespace EZVendor.Item.Filters
             {
                 return Actions.Keep;
             }
+        }
+
+        private static bool IsSameName(string s1, string s2)
+        {
+            var rgx = new Regex("[^a-z]");
+            s1 = rgx.Replace(s1.ToLower(), "");
+            s2 = rgx.Replace(s2.ToLower(), "");
+            return s1 == s2;
         }
     }
 }

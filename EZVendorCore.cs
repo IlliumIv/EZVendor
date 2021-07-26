@@ -23,20 +23,20 @@ namespace EZVendor
 {
     internal class MyItem
     {
-        internal long InitialInvItemItemAddress { get; }
+        internal long? InitialInvItemItemAddress { get; }
         internal NormalInventoryItem InvItem { get; }
 
         public MyItem(NormalInventoryItem invItem)
         {
             InvItem = invItem;
-            InitialInvItemItemAddress = InvItem.Item.Address;
+            InitialInvItemItemAddress = InvItem?.Item?.Address;
         }
     }
     
     public class EZVendorCore : BaseSettingsPlugin<EZVendorSettings>
     {
-        private const int MaxIDTimes = 3;
-        private const int MaxVendorTimes = 4;
+        private const int MaxIDTimes = 2;
+        private const int MaxVendorTimes = 3;
         private const int MaxSameBases = 4;
         private const string MainCoroutineName = "EZV_Main";
         private const string TwoStoneBase1 = @"Metadata/Items/Rings/Ring12";
@@ -48,13 +48,16 @@ namespace EZVendor
 
         public override bool Initialise()
         {
+            Input.RegisterKey(Keys.LControlKey);
+            Input.RegisterKey(Keys.LShiftKey);
             Input.RegisterKey(Settings.MainHotkey2);
             Input.RegisterKey(Settings.CopyStatsHotkey2);
             Input.RegisterKey(Settings.StopHotkey2);
             _ninja = new NinjaUniqueProvider(
-                Settings.ChaosUniqueCutoff2,
+                Settings.Unique0LChaosCutoff,
+                Settings.Unique6LChaosCutoff,
                 DirectoryFullName,
-                Settings.LeagueName4);
+                Settings.LeagueNameExpedition);
             _itemFactory = new ItemFactory(
                 GameController,
                 _ninja,
@@ -64,7 +67,7 @@ namespace EZVendor
                 Settings.VendorInfluenced2,
                 Settings.VendorAllRares2,
                 Settings.StricterFiltering2,
-                Settings.Sell6Links2);
+                Settings.SellNonUnique6Links);
             return true;
         }
 
@@ -81,8 +84,7 @@ namespace EZVendor
             ImGui.BulletText("Other rares: vendor for alts");
             ImGui.Text("Avoid selling 5 to 1 recipe, prismatic ring recipe");
             ImGui.BulletText("Uniques: ninja sell cheap");
-            ImGui.BulletText("Enchants: keep 10c+ (hard coded list)");
-            ImGui.BulletText("6L: keep (except Tabula), 6S: vendor");
+            ImGui.BulletText("6L: keep expensive uniques, 6S: vendor");
             ImGui.BulletText("Transmutes: vendor");
             ImGui.NewLine();
             ImGui.Text("This plugin will sort 95 percent of rare garbage");
@@ -91,11 +93,12 @@ namespace EZVendor
                        "it doesnt sell trash item then move this item to player inventory, \r\n" +
                        "mouse over it, press debug key and send me msg");
             ImGui.NewLine();
-            ImGui.InputText("League name", ref Settings.LeagueName4, 255);
+            ImGui.InputText("League name", ref Settings.LeagueNameExpedition, 255);
             base.DrawSettings();
             if (ImGui.Button("Delete ninja cache (after you change settings)"))
             {
-                File.Delete(Path.Combine(DirectoryFullName, "ninja.json"));
+                File.Delete(Path.Combine(DirectoryFullName, "ninja0L.json"));
+                File.Delete(Path.Combine(DirectoryFullName, "ninja6L.json"));
             }
         }
 
@@ -109,12 +112,7 @@ namespace EZVendor
             switch (eventId)
             {
                 case "start_ezv":
-                    if (Core.ParallelRunner.FindByName(MainCoroutineName) == null)
-                    {
-                        LogMessage("[EZV] started");
-                        PublishEvent("ezv_started", null);
-                        StartMainCoroutine();
-                    }
+                    StartMainCoroutine();
                     break;
             }
         }
@@ -123,11 +121,8 @@ namespace EZVendor
         {
             #region start main routine
 
-            if (Settings.MainHotkey2.PressedOnce() &&
-                Core.ParallelRunner.FindByName(MainCoroutineName) == null)
+            if (Settings.MainHotkey2.PressedOnce())
             {
-                LogMessage("[EZV] started");
-                PublishEvent("ezv_started", null);
                 StartMainCoroutine();
             }
 
@@ -212,7 +207,10 @@ namespace EZVendor
 
         private void StartMainCoroutine()
         {
+            if (Core.ParallelRunner.FindByName(MainCoroutineName) != null) return;
+            LogMessage("[EZV] started");
             Core.ParallelRunner?.Run(new Coroutine(MainRoutine(), this, MainCoroutineName));
+            PublishEvent("ezv_started", null);
         }
 
         private IEnumerator MainRoutine()
@@ -273,16 +271,14 @@ namespace EZVendor
                 yield return ClickSellWindowAcceptButton();
                 if (Settings.DebugLog2) LogMessage("[EZV] WaitForClosedInventory");
                 yield return WaitForClosedInventory();
-                if (!badVendorRecipes)
-                {
-                    PublishEvent("ezv_finished", null);
-                    LogMessage("[EZV] finished");
-                    yield break;
-                }
+                if (!badVendorRecipes) break;
             }
 
+            // Make sure keys are not stuck
+            Input.KeyUp(Keys.LShiftKey);
+            Input.KeyUp(Keys.LControlKey);
             PublishEvent("ezv_finished", null);
-            LogMessage("[EZV] timeout");
+            LogMessage("[EZV] finished");
         }
 
         private IEnumerator WaitForOpenInventory(int timeoutMs = 5000)
@@ -349,9 +345,9 @@ namespace EZVendor
                                 pathCount.Add(key, 1);
                         }                   
                     }
-                    catch (Exception)
+                    catch (Exception e)
                     {
-                        LogMessage($"[EZV] Found krangled item. Selling", 30);
+                        LogMessage($"[EZV] Found krangled item. Selling " + e.StackTrace, 30);
                         vendorList.Add(new MyItem(invItem));
                     }
                 }
@@ -371,7 +367,7 @@ namespace EZVendor
                     from invItem in GetInventoryItems()
                     let item = invItem.Item
                     let modsComponent = item.HasComponent<Mods>() ? item.GetComponent<Mods>() : null
-                    where modsComponent?.Identified == false
+                    where item.Type == EntityType.Error || modsComponent?.Identified == false
                     let socketsComponent = item.HasComponent<Sockets>() ? item.GetComponent<Sockets>() : null
                     let sixSockets = socketsComponent?.NumberOfSockets == 6
                     let sixLinks = socketsComponent?.LargestLinkSize == 6
@@ -394,48 +390,77 @@ namespace EZVendor
         /// <param name="vendorList"></param>
         /// <param name="basesCount"></param>
         /// <returns>true - removed something</returns>
-        private static bool RemoveBadVendorRecipes(
+        private bool RemoveBadVendorRecipes(
             IList<MyItem> vendorList,
             IDictionary<string, int> basesCount)
         {
             var removedSomething = false;
-            // 5 to 1 recipe
-            foreach (var key in basesCount.Keys)
+
+            try
             {
-                var value = basesCount[key];
-                if (value <= MaxSameBases) continue;
-                removedSomething |= Remove(vendorList, key, value - MaxSameBases);
+                // 5 to 1 recipe
+                foreach (var key in basesCount.Keys)
+                {
+                    var value = basesCount[key];
+                    if (value <= MaxSameBases) continue;
+                    removedSomething |= Remove(vendorList, key, value - MaxSameBases);
+                }
+            }
+            catch (Exception e)
+            {
+                LogError($"[EZV] RemoveBadVendorRecipes #1 " + e.StackTrace, 30);
             }
 
             // prismatic ring
-            for (var i = 0; i < 10; i++)
+            try
             {
-                var count = 0;
-                var r1 = vendorList.Count(myItem => myItem.InvItem.Item.Path == TwoStoneBase1);
-                if (r1 > 0) count++;
-                var r2 = vendorList.Count(myItem => myItem.InvItem.Item.Path == TwoStoneBase2);
-                if (r2 > 0) count++;
-                var r3 = vendorList.Count(myItem => myItem.InvItem.Item.Path == TwoStoneBase3);
-                if (r3 > 0) count++;
-                if (count == 3)
+                for (var i = 0; i < 10; i++)
                 {
-                    var key = TwoStoneBase3;
-                    if (r1 <= r2 && r1 <= r3) key = TwoStoneBase1;
-                    else if (r2 <= r1 && r2 <= r3) key = TwoStoneBase2;
-                    removedSomething |= Remove(vendorList, key);
+                    var count = 0;
+                    var r1 = vendorList.Count(myItem => myItem?.InvItem?.Item?.Path == TwoStoneBase1);
+                    if (r1 > 0) count++;
+                    var r2 = vendorList.Count(myItem => myItem?.InvItem?.Item?.Path == TwoStoneBase2);
+                    if (r2 > 0) count++;
+                    var r3 = vendorList.Count(myItem => myItem?.InvItem?.Item?.Path == TwoStoneBase3);
+                    if (r3 > 0) count++;
+                    if (count == 3)
+                    {
+                        var key = TwoStoneBase3;
+                        if (r1 <= r2 && r1 <= r3) key = TwoStoneBase1;
+                        else if (r2 <= r1 && r2 <= r3) key = TwoStoneBase2;
+                        removedSomething |= Remove(vendorList, key);
+                    }
                 }
+            }
+            catch (Exception e)
+            {
+                LogError($"[EZV] RemoveBadVendorRecipes #2 " + e.StackTrace, 30);
             }
             
             // transmute + 2 amulets
-            if (vendorList.Count(myItem => myItem.InvItem.Item.Path.Contains("Amulets")) >= 2)
+            try
             {
-                removedSomething |= Remove(vendorList, @"Metadata/Items/Currency/CurrencyUpgradeToMagic");
+                if (vendorList.Count(myItem => myItem?.InvItem?.Item?.Path.Contains("Amulets") == true) >= 2)
+                {
+                    removedSomething |= Remove(vendorList, @"Metadata/Items/Currency/CurrencyUpgradeToMagic");
+                }
             }
-            
-            // weapon + whetstone
-            if (vendorList.Count(myItem => myItem.InvItem.Item.Path.Contains("Weapons")) >= 1)
+            catch (Exception e)
             {
-                removedSomething |= Remove(vendorList, @"Metadata/Items/Currency/CurrencyWeaponQuality");
+                LogError($"[EZV] RemoveBadVendorRecipes #3 " + e.StackTrace, 30);
+            }
+
+            try
+            {
+                // weapon + whetstone
+                if (vendorList.Count(myItem => myItem?.InvItem?.Item?.Path.Contains("Weapons") == true) >= 1)
+                {
+                    removedSomething |= Remove(vendorList, @"Metadata/Items/Currency/CurrencyWeaponQuality");
+                }
+            }
+            catch (Exception e)
+            {
+                LogError($"[EZV] RemoveBadVendorRecipes #4 " + e.StackTrace, 30);
             }
 
             return removedSomething;
@@ -470,24 +495,26 @@ namespace EZVendor
         /// <returns></returns>
         private IEnumerator DoVendorGarbage(IList<MyItem> itemList)
         {
+            if (!itemList.Any()) yield break;
             LogMessage($"[EZV] Want to sell {itemList.Count} items");
-            if (itemList.Count == 0) yield break;
-            yield return ClickAll(itemList, 4, Keys.ControlKey, MouseButtons.Left);
+            yield return ClickAll(itemList, 4, Keys.LControlKey, MouseButtons.Left);
+            Input.KeyUp(Keys.LControlKey);
         }
 
         private IEnumerator DoUnid(IList<MyItem> itemList)
         {
+            if (!itemList.Any()) yield break;
             LogMessage($"[EZV] Want to unid {itemList.Count} items");
-            if (itemList.Count == 0) yield break;
             var scrollOfWisdom = GetInventoryItem("Metadata/Items/Currency/CurrencyIdentification");
             if (scrollOfWisdom == null)
             {
                 LogMessage($"[EZV] No ID scrolls", 20);
                 yield break;
             }
-            Input.KeyDown(Keys.ShiftKey);
+            Input.KeyDown(Keys.LShiftKey);
             yield return ClickItem(scrollOfWisdom, MouseButtons.Right);
-            yield return ClickAll(itemList, 3, Keys.ShiftKey, MouseButtons.Left);
+            yield return ClickAll(itemList, 3, Keys.LShiftKey, MouseButtons.Left);
+            Input.KeyUp(Keys.LShiftKey);
         }
 
         /// <summary>
@@ -504,28 +531,27 @@ namespace EZVendor
             Keys keyToHold,
             MouseButtons mouseButton)
         {
-            if (itemList.Count == 0) yield break;
+            if (!itemList.Any()) yield break;
             Input.KeyDown(keyToHold);
             for (var step = 1; step <= iterations; step++)
             {
                 for (var i = itemList.Count - 1; i >= 0; i--)
                 {
                     if (!IsInventoryOpened() || !IsSellWindowOpened()) break;
-                    var invItem = itemList[i].InvItem;
-                    if (invItem.Item.ComponentList == 0 ||
-                        invItem.Item.Rarity == MonsterRarity.Error ||
-                        invItem.Item.HasComponent<Base>() == false ||
-                        invItem.Item == null ||
-                        invItem.Address == 0 ||
-                        invItem.Item.Address == 0 ||
-                        GetServerItem(itemList[i].InitialInvItemItemAddress) == null)
+                    var invItem = itemList?[i].InvItem;
+                    if (invItem?.Item?.Type == EntityType.Error)
+                    {
+                        LogError($"[EZV] Selling krangled item", 30);
+                        yield return ClickItem(invItem, mouseButton);
+                    }
+                    if (GetServerItem(itemList?[i].InitialInvItemItemAddress) == null)
                     {
                         itemList.RemoveAt(i);
                         continue;
                     }
                     yield return ClickItem(invItem, mouseButton);
                 }
-                if (itemList.Count == 0) break;
+                if (!itemList.Any()) break;
                 yield return new WaitTime(100 + Latency);
             }
             Input.KeyUp(keyToHold);
@@ -539,11 +565,11 @@ namespace EZVendor
         /// <returns></returns>
         private IEnumerator ClickItem(Element invItem, MouseButtons mouseButton)
         {
-            for (var j = 0; j < 20; j++) // timeout = 20 x DelayAfterMouseMove
+            LogMessage($"[EZV] ClickItem ", 30);
+            for (var j = 0; j < 10; j++) // timeout = 10 x DelayAfterMouseMove
             {
                 if (!invItem.GetClientRectCache.Intersects(GetPlayerInventory().GetClientRectCache)) yield break;
-                Input.SetCursorPos(invItem.GetClientRect().ClickRandom());
-                Input.MouseMove();
+                yield return Input.SetCursorPositionSmooth(invItem.GetClientRect().ClickRandom());
                 yield return new WaitTime(Settings.Delay1AfterMouseMove2);
                 if (GameController.IngameState.UIHoverElement.Address > 0 &&
                     GameController.IngameState.UIHoverElement.Address == invItem.Address)
@@ -578,13 +604,12 @@ namespace EZVendor
                 yield break;
             }
 
-            Input.KeyDown(Keys.ControlKey);
+            Input.KeyDown(Keys.LControlKey);
             yield return Input.SetCursorPositionSmooth(npc.Label.GetClientRectCache.ClickRandom());
-            Input.MouseMove();
             yield return new WaitTime(100 + Latency);
             Input.Click(MouseButtons.Left);
             yield return new WaitTime(100 + Latency);
-            Input.KeyUp(Keys.ControlKey);
+            Input.KeyUp(Keys.LControlKey);
         }
 
         /// <summary>
@@ -607,51 +632,56 @@ namespace EZVendor
             yield return new WaitTime(100 + Latency);
         }
 
-        private bool IsInventoryOpened()
-        {
-            return GameController
-                .IngameState
-                .IngameUi
-                .InventoryPanel
-                .IsVisible;
-        }
+        private bool IsInventoryOpened() =>
+            GameController
+                ?.IngameState
+                ?.IngameUi
+                ?.InventoryPanel
+                ?.IsVisible == true;
 
-        private bool IsSellWindowOpened()
-        {
-            return GameController
-                .IngameState
-                .IngameUi
-                .SellWindow
-                .IsVisible;
-        }
+        private bool IsSellWindowOpened() =>
+            GameController
+                ?.IngameState
+                ?.IngameUi
+                ?.SellWindow
+                ?.IsVisible == true ||
+            GameController
+                ?.IngameState
+                ?.IngameUi
+                ?.TradeWindow
+                ?.IsVisible == true;
 
-        private NormalInventoryItem GetInventoryItem(long address)
-        {
-            return GetInventoryItems()?.FirstOrDefault(item => item?.Address == address);
-        }
+        private NormalInventoryItem GetInventoryItem(long address) => 
+            GetInventoryItems()
+                ?.FirstOrDefault(item =>
+                    item?.Address == address);
 
-        private NormalInventoryItem GetInventoryItem(string path)
-        {
-            return GetInventoryItems()?.FirstOrDefault(item => item?.Item?.Path?.Contains(path) == true);
-        }
-        
-        private Inventory GetPlayerInventory() => GameController.IngameState.IngameUi.InventoryPanel[InventoryIndex.PlayerInventory];
+        private NormalInventoryItem GetInventoryItem(string path) => 
+            GetInventoryItems()
+                ?.FirstOrDefault(item =>
+                    item?.Item?.Path == path);
 
-        private IEnumerable<NormalInventoryItem> GetInventoryItems() => GetPlayerInventory().VisibleInventoryItems;
+        private Inventory GetPlayerInventory() => 
+            GameController
+                ?.IngameState
+                ?.IngameUi
+                ?.InventoryPanel?[InventoryIndex.PlayerInventory];
 
-        private Entity GetServerItem(long address)
-        {
-            return GetServerItems()?.FirstOrDefault(item => item?.Address == address);
-        }
-        
-        private IEnumerable<Entity> GetServerItems()
-        {
-            return GameController
-                .IngameState
-                .ServerData
-                .PlayerInventories[0]
-                .Inventory
-                .Items;
-        }
+        private IEnumerable<NormalInventoryItem> GetInventoryItems() => 
+            GetPlayerInventory()
+                ?.VisibleInventoryItems;
+
+        private Entity GetServerItem(long? address) => 
+            GetServerItems()
+                ?.FirstOrDefault(item =>
+                    item?.Address == address);
+
+        private IEnumerable<Entity> GetServerItems() =>
+            GameController
+                ?.IngameState
+                ?.ServerData
+                ?.PlayerInventories?[0]
+                ?.Inventory
+                ?.Items;
     }
 }

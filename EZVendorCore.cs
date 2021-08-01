@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -44,7 +45,7 @@ namespace EZVendor
         private const string TwoStoneBase3 = @"Metadata/Items/Rings/Ring14";
         private IItemFactory _itemFactory;
         private INinjaProvider _ninja;
-        private int Latency => (int) (GameController?.IngameState?.ServerData.Latency ?? 50);
+        private int Latency => GameController?.IngameState?.ServerData?.Latency ?? 50;
 
         public override bool Initialise()
         {
@@ -118,8 +119,60 @@ namespace EZVendor
             }
         }
 
+        #region Tracking item under cursor
+
+        private readonly Stopwatch _cursorStuckWithGarbageTimer = new Stopwatch();
+
+        private bool IsCursorWithItem()
+        {
+            if (GameController?.Game?.IsPreGame == true) return false;
+            try
+            {
+                var playerInventories = GameController
+                    ?.Game
+                    ?.IngameState
+                    ?.ServerData
+                    ?.PlayerInventories;
+                var cursorItems =
+                    (from playerInventory in playerInventories
+                        select playerInventory?.Inventory
+                        into inventory
+                        where inventory?.InventType == InventoryTypeE.Cursor
+                        select inventory)
+                    .FirstOrDefault();
+                if (cursorItems?.Items?.Count != 1) return false;
+                var cursorItem = cursorItems?.Items?[0];
+                return !string.IsNullOrEmpty(cursorItem?.Path);
+            }
+            catch (Exception e) // ok
+            {
+                return false;
+            }
+        }
+
+        private void UpdateCursorStuckWithGarbageTimer()
+        {
+            if (IsCursorWithItem())
+                _cursorStuckWithGarbageTimer.Start();
+            else if (_cursorStuckWithGarbageTimer.IsRunning) 
+                _cursorStuckWithGarbageTimer.Reset();
+        }
+
+        #endregion
+        
         public override Job Tick()
         {
+            #region Stop if we have stuck item under cursor
+
+            UpdateCursorStuckWithGarbageTimer();
+            if (_cursorStuckWithGarbageTimer.ElapsedMilliseconds > 5000)
+            {
+                Core.ParallelRunner?.FindByName(MainCoroutineName)?.Done(true);
+                return null;
+            }
+
+            #endregion
+            
             #region start main routine
 
             if (Settings.MainHotkey2.PressedOnce())
@@ -168,7 +221,17 @@ namespace EZVendor
                 {
                     LogMessage(e.StackTrace, 20);
                 }
-
+                
+                try
+                {
+                    if (itemComponent.ItemRarity == ItemRarity.Unique)
+                        stats += $"Internal name: {itemComponent?.UniqueName} " + Environment.NewLine;
+                }
+                catch (Exception e)
+                {
+                    LogMessage(e.StackTrace, 20);
+                }
+                
                 stats += "Human mods (this one is often broken in PoeHUD): " + Environment.NewLine;
                 try
                 {
